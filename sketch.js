@@ -1,14 +1,15 @@
 let video;
 let facemesh;
 let faces = [];
+let statusText = "正在載入模型，請稍候...";
 
-// 右眼外圈（247 這組）
+// 右眼外圈：247 獨立畫成一圈
 const rightEyeOuter = [
   247, 30, 29, 27, 28, 56, 190, 243,
   112, 26, 22, 23, 24, 110, 25, 130
 ];
 
-// 右眼內圈（246 這組）
+// 右眼內圈：246 獨立畫成一圈
 const rightEyeInner = [
   246, 161, 160, 159, 158, 157, 173, 133,
   155, 154, 153, 145, 144, 163, 7, 33
@@ -25,12 +26,27 @@ function preload() {
 function setup() {
   createCanvas(windowWidth, windowHeight);
 
-  // 建立攝影機
-  video = createCapture(VIDEO);
+  video = createCapture(
+    {
+      video: {
+        facingMode: "user"
+      },
+      audio: false
+    },
+    videoReady
+  );
+
   video.size(640, 480);
   video.hide();
 
-  // 啟動 FaceMesh
+  // 手機瀏覽器重要設定
+  video.elt.setAttribute("playsinline", "");
+  video.elt.setAttribute("autoplay", "");
+  video.elt.setAttribute("muted", "");
+}
+
+function videoReady() {
+  statusText = "攝影機已啟動，正在偵測臉部...";
   facemesh.detectStart(video, gotFaces);
 }
 
@@ -39,13 +55,19 @@ function gotFaces(results) {
 }
 
 function draw() {
-  // 背景
   background("#FFFF93");
 
-  // 攝影機顯示大小：全螢幕寬高的 50%
+  // 攝影機還沒準備好時
+  if (!video || video.width === 0 || video.height === 0) {
+    showStatus("等待攝影機開啟...");
+    return;
+  }
+
+  // 影像最大顯示尺寸：全螢幕寬高的 50%
   let maxW = width * 0.5;
   let maxH = height * 0.5;
 
+  // 等比例縮放
   let videoRatio = video.width / video.height;
   let drawW, drawH;
 
@@ -69,37 +91,45 @@ function draw() {
   image(video, 0, 0, drawW, drawH);
   pop();
 
-  // 若偵測到臉，畫右眼外圈與內圈
+  // 畫右眼外圈與內圈
   if (faces.length > 0) {
+    statusText = "已偵測到臉部";
+
     let face = faces[0];
     let keypoints = face.keypoints;
 
     push();
-    translate(offsetX + drawW / 2, offsetY + drawH / 2);
-    scale(-1, 1); // 與鏡像畫面同步
 
-    stroke(255, 0, 0); // 紅色
-    strokeWeight(1);   // 粗細 1
+    // 與攝影機畫面同位置、同大小、同鏡像
+    translate(offsetX + drawW / 2, offsetY + drawH / 2);
+    scale(-1, 1);
+
+    stroke(255, 0, 0);
+    strokeWeight(1);
     noFill();
 
-    // 畫右眼外圈
+    // 外圈：247
     drawClosedLoop(rightEyeOuter, keypoints, drawW, drawH);
 
-    // 畫右眼內圈
+    // 內圈：246
     drawClosedLoop(rightEyeInner, keypoints, drawW, drawH);
 
     pop();
+  } else {
+    statusText = "請將臉部靠近攝影機";
   }
+
+  showStatus(statusText);
 }
 
-// 畫封閉輪廓
+// 使用 line() 畫封閉圈
 function drawClosedLoop(indices, keypoints, drawW, drawH) {
   for (let i = 0; i < indices.length; i++) {
-    let currentIndex = indices[i];
-    let nextIndex = indices[(i + 1) % indices.length]; // 最後一點接回第一點
+    let index1 = indices[i];
+    let index2 = indices[(i + 1) % indices.length];
 
-    let p1 = keypoints[currentIndex];
-    let p2 = keypoints[nextIndex];
+    let p1 = keypoints[index1];
+    let p2 = keypoints[index2];
 
     if (p1 && p2) {
       let x1 = map(p1.x, 0, video.width, -drawW / 2, drawW / 2);
@@ -111,6 +141,15 @@ function drawClosedLoop(indices, keypoints, drawW, drawH) {
       line(x1, y1, x2, y2);
     }
   }
+}
+
+// 顯示狀態文字
+function showStatus(msg) {
+  fill(0);
+  noStroke();
+  textAlign(CENTER, CENTER);
+  textSize(20);
+  text(msg, width / 2, height * 0.85);
 }
 
 function windowResized() {
