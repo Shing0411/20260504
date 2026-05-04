@@ -3,7 +3,11 @@ let facemesh;
 let faces = [];
 
 let statusText = "正在載入模型，請稍候...";
-let modelStarted = false;
+let videoReady = false;
+let modelReady = false;
+let detectionStarted = false;
+
+let stars = [];
 
 // =========================
 // 右眼
@@ -55,17 +59,11 @@ const faceOutline = [
   54, 103, 67, 109
 ];
 
-function preload() {
-  facemesh = ml5.faceMesh({
-    maxFaces: 1,
-    refineLandmarks: true,
-    flipped: false
-  });
-}
-
 function setup() {
   createCanvas(windowWidth, windowHeight);
+  initStars();
 
+  // 建立攝影機
   video = createCapture({
     video: {
       facingMode: "user"
@@ -80,33 +78,66 @@ function setup() {
   video.elt.setAttribute("autoplay", "");
   video.elt.setAttribute("muted", "");
 
-  statusText = "正在開啟攝影機...";
+  // 攝影機 metadata 準備好
+  video.elt.onloadedmetadata = () => {
+    videoReady = true;
+    if (modelReady) {
+      statusText = "攝影機已啟動，請將臉對準鏡頭";
+    } else {
+      statusText = "攝影機已啟動，正在載入模型...";
+    }
+    startDetectionIfReady();
+  };
+
+  // 載入 FaceMesh
+  facemesh = ml5.faceMesh(
+    {
+      maxFaces: 1,
+      refineLandmarks: true,
+      flipped: false
+    },
+    () => {
+      modelReady = true;
+      if (videoReady) {
+        statusText = "模型已載入，請將臉對準鏡頭";
+      } else {
+        statusText = "模型已載入，等待攝影機...";
+      }
+      startDetectionIfReady();
+    }
+  );
+}
+
+function startDetectionIfReady() {
+  if (videoReady && modelReady && !detectionStarted) {
+    facemesh.detectStart(video, gotFaces);
+    detectionStarted = true;
+  }
+}
+
+function gotFaces(results) {
+  faces = results;
 }
 
 function draw() {
-  background("#FFFF93");
+  background(0);
+  drawStars();
 
+  // 攝影機尚未準備完成
   if (!video || !video.elt || video.elt.videoWidth === 0 || video.elt.videoHeight === 0) {
-    showStatus("等待攝影機開啟...");
+    showStatus(statusText);
     return;
   }
 
   let realVideoW = video.elt.videoWidth;
   let realVideoH = video.elt.videoHeight;
 
-  // 讓 p5 的 video 尺寸跟真實攝影機尺寸同步
+  // 同步 video 尺寸，避免手機直式飄移
   if (video.width !== realVideoW || video.height !== realVideoH) {
     video.size(realVideoW, realVideoH);
   }
 
-  // 只啟動一次 FaceMesh
-  if (!modelStarted) {
-    facemesh.detectStart(video, gotFaces);
-    modelStarted = true;
-    statusText = "攝影機已啟動，正在偵測臉部...";
-  }
-
-  // 顯示大小：全螢幕寬高的 50%
+  // 影像顯示尺寸：畫面寬高的 50% 內
   let maxW = width * 0.5;
   let maxH = height * 0.5;
 
@@ -124,85 +155,221 @@ function draw() {
   let centerX = width / 2;
   let centerY = height / 2;
 
-  // =========================
-  // 顯示鏡像攝影機影像
-  // =========================
-  push();
-  translate(centerX, centerY);
-  scale(-1, 1);
-  imageMode(CENTER);
-  image(video, 0, 0, drawW, drawH);
-  pop();
-
-  // =========================
-  // 畫 FaceMesh 線條
-  // =========================
-  if (faces.length > 0) {
-    statusText = "已偵測到臉部";
-
-    let face = faces[0];
-    let keypoints = face.keypoints;
-
-    push();
-    translate(centerX, centerY);
-    scale(-1, 1);
-
-    stroke(255, 0, 0);
-    strokeWeight(1);
-    noFill();
-
-    // 臉部最外層輪廓
-    drawClosedLoop(faceOutline, keypoints, realVideoW, realVideoH, drawW, drawH);
-
-    // 右眼
-    drawClosedLoop(rightEyeOuter, keypoints, realVideoW, realVideoH, drawW, drawH);
-    drawClosedLoop(rightEyeInner, keypoints, realVideoW, realVideoH, drawW, drawH);
-
-    // 左眼
-    drawClosedLoop(leftEyeOuter, keypoints, realVideoW, realVideoH, drawW, drawH);
-    drawClosedLoop(leftEyeInner, keypoints, realVideoW, realVideoH, drawW, drawH);
-
-    // 嘴巴
-    drawClosedLoop(mouthOuter, keypoints, realVideoW, realVideoH, drawW, drawH);
-    drawClosedLoop(mouthInner, keypoints, realVideoW, realVideoH, drawW, drawH);
-
-    pop();
-  } else {
-    statusText = "請將臉部靠近攝影機";
+  // 還沒偵測到臉：先正常顯示攝影機，避免誤以為壞掉
+  if (faces.length === 0) {
+    drawMirroredVideo(centerX, centerY, drawW, drawH);
+    statusText = detectionStarted ? "請將整張臉放進鏡頭內" : statusText;
+    showStatus(statusText);
+    return;
   }
 
+  // 偵測到臉
+  let face = faces[0];
+  let keypoints = face.keypoints;
+
+  // =========================
+  // 先畫黑底星空，再只在臉部輪廓內顯示影片
+  // =========================
+  drawClippedFaceVideo(
+    keypoints,
+    faceOutline,
+    realVideoW,
+    realVideoH,
+    drawW,
+    drawH,
+    centerX,
+    centerY
+  );
+
+  // =========================
+  // 畫臉部外層霓虹光輪廓
+  // =========================
+  drawNeonLoop(
+    faceOutline,
+    keypoints,
+    realVideoW,
+    realVideoH,
+    drawW,
+    drawH,
+    centerX,
+    centerY
+  );
+
+  // =========================
+  // 畫五官線條
+  // =========================
+  stroke(255, 0, 0);
+  strokeWeight(1);
+  noFill();
+
+  // 右眼
+  drawClosedLoop(rightEyeOuter, keypoints, realVideoW, realVideoH, drawW, drawH, centerX, centerY);
+  drawClosedLoop(rightEyeInner, keypoints, realVideoW, realVideoH, drawW, drawH, centerX, centerY);
+
+  // 左眼
+  drawClosedLoop(leftEyeOuter, keypoints, realVideoW, realVideoH, drawW, drawH, centerX, centerY);
+  drawClosedLoop(leftEyeInner, keypoints, realVideoW, realVideoH, drawW, drawH, centerX, centerY);
+
+  // 嘴巴
+  drawClosedLoop(mouthOuter, keypoints, realVideoW, realVideoH, drawW, drawH, centerX, centerY);
+  drawClosedLoop(mouthInner, keypoints, realVideoW, realVideoH, drawW, drawH, centerX, centerY);
+
+  statusText = "已偵測到臉部";
   showStatus(statusText);
 }
 
-// 用 line() 畫出封閉輪廓
-function drawClosedLoop(indices, keypoints, videoW, videoH, drawW, drawH) {
+// =========================
+// 只在臉部輪廓內顯示攝影機
+// =========================
+function drawClippedFaceVideo(keypoints, outlineIndices, videoW, videoH, drawW, drawH, centerX, centerY) {
+  let ctx = drawingContext;
+  ctx.save();
+  ctx.beginPath();
+
+  for (let i = 0; i < outlineIndices.length; i++) {
+    let idx = outlineIndices[i];
+    let p = toScreenPoint(keypoints[idx], videoW, videoH, drawW, drawH, centerX, centerY);
+
+    if (i === 0) {
+      ctx.moveTo(p.x, p.y);
+    } else {
+      ctx.lineTo(p.x, p.y);
+    }
+  }
+
+  ctx.closePath();
+  ctx.clip();
+
+  // 在裁切範圍內畫鏡像影片
+  drawMirroredVideo(centerX, centerY, drawW, drawH);
+
+  ctx.restore();
+}
+
+// =========================
+// 畫鏡像影片
+// =========================
+function drawMirroredVideo(centerX, centerY, drawW, drawH) {
+  imageMode(CORNER);
+  image(video, centerX + drawW / 2, centerY - drawH / 2, -drawW, drawH);
+}
+
+// =========================
+// 霓虹發光輪廓
+// =========================
+function drawNeonLoop(indices, keypoints, videoW, videoH, drawW, drawH, centerX, centerY) {
+  let ctx = drawingContext;
+
+  // 外層大光暈
+  ctx.save();
+  ctx.shadowBlur = 28;
+  ctx.shadowColor = "rgba(255, 0, 0, 0.95)";
+  stroke(255, 70, 70, 120);
+  strokeWeight(10);
+  noFill();
+  drawClosedLoop(indices, keypoints, videoW, videoH, drawW, drawH, centerX, centerY);
+  ctx.restore();
+
+  // 中層光暈
+  ctx.save();
+  ctx.shadowBlur = 16;
+  ctx.shadowColor = "rgba(255, 0, 0, 0.9)";
+  stroke(255, 40, 40, 180);
+  strokeWeight(5);
+  noFill();
+  drawClosedLoop(indices, keypoints, videoW, videoH, drawW, drawH, centerX, centerY);
+  ctx.restore();
+
+  // 核心亮線
+  ctx.save();
+  ctx.shadowBlur = 8;
+  ctx.shadowColor = "rgba(255, 80, 80, 1)";
+  stroke(255, 0, 0);
+  strokeWeight(2);
+  noFill();
+  drawClosedLoop(indices, keypoints, videoW, videoH, drawW, drawH, centerX, centerY);
+  ctx.restore();
+}
+
+// =========================
+// 用 line() 畫封閉輪廓
+// =========================
+function drawClosedLoop(indices, keypoints, videoW, videoH, drawW, drawH, centerX, centerY) {
   for (let i = 0; i < indices.length; i++) {
-    let index1 = indices[i];
-    let index2 = indices[(i + 1) % indices.length];
+    let idx1 = indices[i];
+    let idx2 = indices[(i + 1) % indices.length];
 
-    let p1 = keypoints[index1];
-    let p2 = keypoints[index2];
+    let p1 = toScreenPoint(keypoints[idx1], videoW, videoH, drawW, drawH, centerX, centerY);
+    let p2 = toScreenPoint(keypoints[idx2], videoW, videoH, drawW, drawH, centerX, centerY);
 
-    if (p1 && p2) {
-      let x1 = map(p1.x, 0, videoW, -drawW / 2, drawW / 2);
-      let y1 = map(p1.y, 0, videoH, -drawH / 2, drawH / 2);
+    line(p1.x, p1.y, p2.x, p2.y);
+  }
+}
 
-      let x2 = map(p2.x, 0, videoW, -drawW / 2, drawW / 2);
-      let y2 = map(p2.y, 0, videoH, -drawH / 2, drawH / 2);
+// =========================
+// 將 facemesh 點位轉成畫面座標（含鏡像）
+// =========================
+function toScreenPoint(pt, videoW, videoH, drawW, drawH, centerX, centerY) {
+  let localX = map(pt.x, 0, videoW, drawW / 2, -drawW / 2); // 水平鏡像
+  let localY = map(pt.y, 0, videoH, -drawH / 2, drawH / 2);
 
-      line(x1, y1, x2, y2);
+  return {
+    x: centerX + localX,
+    y: centerY + localY
+  };
+}
+
+// =========================
+// 星空背景
+// =========================
+function initStars() {
+  stars = [];
+  let count = floor((windowWidth * windowHeight) / 9000);
+
+  for (let i = 0; i < count; i++) {
+    stars.push({
+      x: random(windowWidth),
+      y: random(windowHeight),
+      size: random(1, 3.5),
+      alpha: random(120, 255),
+      phase: random(TWO_PI),
+      kind: random() < 0.2 ? "cross" : "dot"
+    });
+  }
+}
+
+function drawStars() {
+  noStroke();
+
+  for (let s of stars) {
+    let twinkle = 0.65 + 0.35 * sin(frameCount * 0.03 + s.phase);
+    let a = s.alpha * twinkle;
+
+    if (s.kind === "dot") {
+      fill(255, a);
+      circle(s.x, s.y, s.size);
+    } else {
+      stroke(255, a);
+      strokeWeight(1);
+      line(s.x - s.size, s.y, s.x + s.size, s.y);
+      line(s.x, s.y - s.size, s.x, s.y + s.size);
+      noStroke();
     }
   }
 }
 
+// =========================
+// 顯示狀態文字
+// =========================
 function showStatus(msg) {
-  fill(0);
+  fill(255);
   noStroke();
   textAlign(CENTER, CENTER);
   textSize(18);
-  text(msg, width / 2, height * 0.85);
+  text(msg, width / 2, height * 0.9);
 }
 
 function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
+  initStars();
 }
