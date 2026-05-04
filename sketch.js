@@ -15,6 +15,18 @@ const rightEyeInner = [
   155, 154, 153, 145, 144, 163, 7, 33
 ];
 
+// 嘴巴外圈
+const mouthOuter = [
+  409, 270, 269, 267, 0, 37, 39, 40, 185, 61,
+  146, 91, 181, 84, 17, 314, 405, 321, 375, 291
+];
+
+// 嘴巴內圈
+const mouthInner = [
+  76, 77, 90, 180, 85, 16, 315, 404, 320, 307,
+  306, 408, 304, 303, 302, 11, 72, 73, 74, 184
+];
+
 function preload() {
   facemesh = ml5.faceMesh({
     maxFaces: 1,
@@ -57,18 +69,21 @@ function gotFaces(results) {
 function draw() {
   background("#FFFF93");
 
-  // 攝影機還沒準備好時
-  if (!video || video.width === 0 || video.height === 0) {
+  if (!video || !video.elt || video.elt.videoWidth === 0 || video.elt.videoHeight === 0) {
     showStatus("等待攝影機開啟...");
     return;
   }
+
+  // 使用真實攝影機尺寸，避免手機直式比例異常
+  let realVideoW = video.elt.videoWidth;
+  let realVideoH = video.elt.videoHeight;
 
   // 影像最大顯示尺寸：全螢幕寬高的 50%
   let maxW = width * 0.5;
   let maxH = height * 0.5;
 
-  // 等比例縮放
-  let videoRatio = video.width / video.height;
+  // 等比例縮放，不變形
+  let videoRatio = realVideoW / realVideoH;
   let drawW, drawH;
 
   if (maxW / maxH > videoRatio) {
@@ -79,7 +94,6 @@ function draw() {
     drawH = drawW / videoRatio;
   }
 
-  // 置中位置
   let offsetX = (width - drawW) / 2;
   let offsetY = (height - drawH) / 2;
 
@@ -91,7 +105,7 @@ function draw() {
   image(video, 0, 0, drawW, drawH);
   pop();
 
-  // 畫右眼外圈與內圈
+  // 畫 FaceMesh 線條
   if (faces.length > 0) {
     statusText = "已偵測到臉部";
 
@@ -104,15 +118,27 @@ function draw() {
     translate(offsetX + drawW / 2, offsetY + drawH / 2);
     scale(-1, 1);
 
-    stroke(255, 0, 0);
-    strokeWeight(1);
     noFill();
 
-    // 外圈：247
-    drawClosedLoop(rightEyeOuter, keypoints, drawW, drawH);
+    // 右眼外圈
+    stroke(255, 0, 0);
+    strokeWeight(1);
+    drawClosedLoop(rightEyeOuter, keypoints, realVideoW, realVideoH, drawW, drawH);
 
-    // 內圈：246
-    drawClosedLoop(rightEyeInner, keypoints, drawW, drawH);
+    // 右眼內圈
+    stroke(255, 0, 0);
+    strokeWeight(1);
+    drawClosedLoop(rightEyeInner, keypoints, realVideoW, realVideoH, drawW, drawH);
+
+    // 嘴巴外圈
+    stroke(255, 0, 0);
+    strokeWeight(15);
+    drawClosedLoop(mouthOuter, keypoints, realVideoW, realVideoH, drawW, drawH);
+
+    // 嘴巴內圈
+    stroke(255, 0, 0);
+    strokeWeight(1);
+    drawClosedLoop(mouthInner, keypoints, realVideoW, realVideoH, drawW, drawH);
 
     pop();
   } else {
@@ -123,7 +149,7 @@ function draw() {
 }
 
 // 使用 line() 畫封閉圈
-function drawClosedLoop(indices, keypoints, drawW, drawH) {
+function drawClosedLoop(indices, keypoints, videoW, videoH, drawW, drawH) {
   for (let i = 0; i < indices.length; i++) {
     let index1 = indices[i];
     let index2 = indices[(i + 1) % indices.length];
@@ -132,23 +158,22 @@ function drawClosedLoop(indices, keypoints, drawW, drawH) {
     let p2 = keypoints[index2];
 
     if (p1 && p2) {
-      let x1 = map(p1.x, 0, video.width, -drawW / 2, drawW / 2);
-      let y1 = map(p1.y, 0, video.height, -drawH / 2, drawH / 2);
+      let x1 = map(p1.x, 0, videoW, -drawW / 2, drawW / 2);
+      let y1 = map(p1.y, 0, videoH, -drawH / 2, drawH / 2);
 
-      let x2 = map(p2.x, 0, video.width, -drawW / 2, drawW / 2);
-      let y2 = map(p2.y, 0, video.height, -drawH / 2, drawH / 2);
+      let x2 = map(p2.x, 0, videoW, -drawW / 2, drawW / 2);
+      let y2 = map(p2.y, 0, videoH, -drawH / 2, drawH / 2);
 
       line(x1, y1, x2, y2);
     }
   }
 }
 
-// 顯示狀態文字
 function showStatus(msg) {
   fill(0);
   noStroke();
   textAlign(CENTER, CENTER);
-  textSize(20);
+  textSize(18);
   text(msg, width / 2, height * 0.85);
 }
 
